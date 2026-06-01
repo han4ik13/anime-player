@@ -20,7 +20,7 @@
 
   /* Top bar */
   #top { position: absolute; top: 0; left: 0; right: 0;
-    padding: calc(env(safe-area-inset-top) + 10px) 14px 30px;
+    padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 14px) 30px calc(env(safe-area-inset-left) + 14px);
     background: linear-gradient(180deg, rgba(0,0,0,.78), rgba(0,0,0,0));
     display: flex; align-items: flex-start; gap: 10px; pointer-events: auto; }
   #title { flex: 1; font-size: 14px; font-weight: 600; line-height: 1.3; padding-top: 8px;
@@ -33,7 +33,9 @@
 
   /* Center prev/next */
   #center { position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);
-    display: flex; align-items: center; justify-content: space-between; padding: 0 14px; pointer-events: none; }
+    display: flex; align-items: center; justify-content: space-between;
+    padding-left: calc(env(safe-area-inset-left) + 28px);
+    padding-right: calc(env(safe-area-inset-right) + 28px); pointer-events: none; }
   .nav { pointer-events: auto; width: 52px; height: 52px; border-radius: 50%;
     background: rgba(30,30,30,.45); border: none; color: #fff; font-size: 25px; cursor: pointer;
     display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); }
@@ -52,9 +54,26 @@
   .qrow.active .check { opacity: 1; color: #3390ec; }
   .qrow.active { color: #3390ec; }
 
+  /* Playlist panel */
+  #playlist { position: absolute; right: 12px; top: calc(env(safe-area-inset-top) + 60px);
+    background: rgba(28,28,30,.97); border-radius: 14px; padding: 6px; min-width: 210px;
+    max-height: 60vh; overflow-y: auto; pointer-events: auto; display: none;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 6; -webkit-overflow-scrolling: touch; }
+  #playlist.open { display: block; }
+  #playlist .hd { font-size: 12px; opacity: .6; padding: 6px 12px 4px; position: sticky; top: 0;
+    background: rgba(28,28,30,.97); }
+  .eprow { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 9px;
+    cursor: pointer; font-size: 15px; }
+  .eprow:active { background: rgba(255,255,255,.08); }
+  .eprow .mark { width: 18px; text-align: center; color: #4caf50; opacity: 0; }
+  .eprow.seen .mark { opacity: 1; }
+  .eprow.seen .nm { opacity: .6; }
+  .eprow.cur { color: #3390ec; }
+  .eprow.cur .mark { color: #3390ec; }
+
   /* Bottom control bar */
   #bottom { position: absolute; left: 0; right: 0; bottom: 0;
-    padding: 30px 16px calc(env(safe-area-inset-bottom) + 16px);
+    padding: 30px calc(env(safe-area-inset-right) + 16px) calc(env(safe-area-inset-bottom) + 16px) calc(env(safe-area-inset-left) + 16px);
     background: linear-gradient(0deg, rgba(0,0,0,.82), rgba(0,0,0,0));
     pointer-events: auto; }
   #row { display: flex; align-items: center; gap: 12px; }
@@ -96,6 +115,7 @@
   <div id="ui">
     <div id="top">
       <div id="title">Загрузка…</div>
+      <button class="icon" id="list" title="Серии">☰</button>
       <button class="icon" id="gear" title="Качество">⚙</button>
     </div>
     <div id="center">
@@ -103,6 +123,7 @@
       <button class="nav" id="next" title="Следующая">›</button>
     </div>
     <div id="settings"><div class="hd">Качество</div><div id="qlist"></div></div>
+    <div id="playlist"><div class="hd">Серии</div><div id="eplist"></div></div>
 
     <div id="bottom">
       <div id="row">
@@ -118,7 +139,7 @@
     </div>
   </div>
 
-  <button id="skip">⏭ Пропустить опенинг</button>
+  <button id="skip">Пропустить опенинг</button>
   <div id="msg"><div class="spin"></div><div id="msgtext">Получаю серию…</div></div>
 </div>
 
@@ -136,10 +157,14 @@
   const player=$("player"), video=$("v"), ui=$("ui"), titleEl=$("title"), msg=$("msg"), msgText=$("msgtext");
   const gear=$("gear"), settings=$("settings"), qlist=$("qlist"), prevBtn=$("prev"), nextBtn=$("next"), skipBtn=$("skip");
   const playpause=$("playpause"), curEl=$("cur"), durEl=$("dur"), muteBtn=$("mute"), fsBtn=$("fs");
+  const listBtn=$("list"), playlist=$("playlist"), eplist=$("eplist");
   const seek=$("seek"), fill=seek.querySelector(".fill"), buf=seek.querySelector(".buf"), thumb=seek.querySelector(".thumb");
 
-  let hls=null, releaseName="Аниме", episodes=[], sources={}, curQuality=null, curOpening=null;
+  let hls=null, releaseName="Аниме", episodes=[], sources={}, curQuality=null, curOpening=null, curEnding=null;
   const posKey = ord => "alib_pos_" + rid + "_" + ord;
+  const watchedKey = "alib_watched_" + rid;
+  function getWatched(){ try { return new Set(JSON.parse(localStorage.getItem(watchedKey) || "[]")); } catch(e){ return new Set(); } }
+  function markWatched(ord){ const s=getWatched(); if(!s.has(ord)){ s.add(ord); localStorage.setItem(watchedKey, JSON.stringify([...s])); buildPlaylist(); } }
   const fmtT = s => { s=Math.floor(s||0); const m=Math.floor(s/60); return m+":"+String(s%60).padStart(2,"0"); };
 
   function showMsg(t,sp){ msg.classList.remove("hidden"); msg.querySelector(".spin").style.display=sp?"block":"none"; msgText.textContent=t; }
@@ -148,8 +173,8 @@
   // overlay auto-hide
   let hideTimer=null;
   function showUI(){ ui.classList.remove("hidden"); clearTimeout(hideTimer);
-    hideTimer=setTimeout(()=>{ if(!video.paused){ ui.classList.add("hidden"); settings.classList.remove("open"); } },3500); }
-  player.addEventListener("pointerdown", e=>{ if(e.target.closest("button")||e.target.closest("#settings")||e.target.closest("#seek")) return; showUI(); });
+    hideTimer=setTimeout(()=>{ if(!video.paused){ ui.classList.add("hidden"); settings.classList.remove("open"); playlist.classList.remove("open"); } },3500); }
+  player.addEventListener("pointerdown", e=>{ if(e.target.closest("button")||e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#seek")) return; showUI(); });
   video.addEventListener("pause", ()=>{ playpause.textContent="▶"; showUI(); });
   video.addEventListener("play",  ()=>{ playpause.textContent="⏸"; showUI(); });
 
@@ -169,7 +194,20 @@
   function buildQ(){ qlist.innerHTML=""; ["1080","720","480"].forEach(q=>{ if(!sources[q])return;
     const r=document.createElement("div"); r.className="qrow"+(q===curQuality?" active":"");
     r.innerHTML='<span class="check">✓</span><span>'+q+'p</span>'; r.onclick=()=>setQuality(q,video.currentTime); qlist.appendChild(r); }); }
-  gear.onclick=()=>{ settings.classList.toggle("open"); showUI(); };
+  gear.onclick=()=>{ playlist.classList.remove("open"); settings.classList.toggle("open"); showUI(); };
+  listBtn.onclick=()=>{ settings.classList.remove("open"); playlist.classList.toggle("open"); showUI(); };
+
+  function buildPlaylist(){
+    const seen=getWatched(); eplist.innerHTML="";
+    episodes.forEach(e=>{
+      const ord=parseFloat(e.ordinal);
+      const row=document.createElement("div");
+      row.className="eprow"+(ord===curOrd?" cur":"")+(seen.has(ord)?" seen":"");
+      row.innerHTML='<span class="mark">✓</span><span class="nm">Серия '+ord+(e.name?" — "+e.name:"")+'</span>';
+      row.onclick=()=>{ playlist.classList.remove("open"); loadEpisode(ord,true); };
+      eplist.appendChild(row);
+    });
+  }
 
   // play/pause, mute, fullscreen
   playpause.onclick=()=>{ video.paused?video.play():video.pause(); };
@@ -197,6 +235,9 @@
     if(!scrubbing){ if(video.duration){ setProgress(t/video.duration); curEl.textContent=fmtT(t); } }
     if(Math.abs(t-lastSave)>4){ lastSave=t; if(t>5&&video.duration&&t<video.duration-5) localStorage.setItem(posKey(curOrd),String(t)); }
     if(curOpening && t>=curOpening.start && t<curOpening.stop-0.5) skipBtn.classList.add("show"); else skipBtn.classList.remove("show");
+    // Mark watched once playback reaches the ending (±5s) or the very end
+    if(curEnding && t>=curEnding.start-5) markWatched(curOrd);
+    else if(video.duration && t>=video.duration-5) markWatched(curOrd);
   });
   skipBtn.onclick=()=>{ if(curOpening){ video.currentTime=curOpening.stop; skipBtn.classList.remove("show"); } };
 
@@ -208,17 +249,18 @@
     curOrd=ordinal; sources={};
     if(e.hls_480) sources["480"]=e.hls_480; if(e.hls_720) sources["720"]=e.hls_720; if(e.hls_1080) sources["1080"]=e.hls_1080;
     curOpening=(e.opening&&e.opening.start!=null&&e.opening.stop!=null)?e.opening:null; skipBtn.classList.remove("show");
+    curEnding=(e.ending&&e.ending.start!=null)?e.ending:null;
     titleEl.textContent=releaseName+" · Серия "+ordinal+(e.name?" — "+e.name:"");
     history.replaceState(null,"","?rid="+rid+"&ep="+ordinal);
     setProgress(0); curEl.textContent="0:00"; buf.style.width="0";
     const q=(keepQ&&sources[curQuality])?curQuality:(sources["720"]?"720":(sources["480"]?"480":"1080"));
     if(!sources[q]){ showMsg("Нет доступных потоков.",false); return; }
     const saved=parseFloat(localStorage.getItem(posKey(ordinal)))||0;
-    hideMsg(); updateNav(); lastSave=saved; setQuality(q,saved); showUI();
+    hideMsg(); updateNav(); buildPlaylist(); lastSave=saved; setQuality(q,saved); showUI();
   }
   prevBtn.onclick=()=>{ const i=curIndex(); if(i>0) loadEpisode(parseFloat(episodes[i-1].ordinal),true); };
   nextBtn.onclick=()=>{ const i=curIndex(); if(i>=0&&i<episodes.length-1) loadEpisode(parseFloat(episodes[i+1].ordinal),true); };
-  video.addEventListener("ended", ()=>{ localStorage.removeItem(posKey(curOrd));
+  video.addEventListener("ended", ()=>{ markWatched(curOrd); localStorage.removeItem(posKey(curOrd));
     const i=curIndex(); if(i>=0&&i<episodes.length-1) loadEpisode(parseFloat(episodes[i+1].ordinal),true); });
 
   // init
