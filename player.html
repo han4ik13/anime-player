@@ -225,8 +225,9 @@
   player.addEventListener("pointerdown", e=>{
     const onPanel  = e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#volpop");
     const onToggle = e.target.closest("#gear")||e.target.closest("#list")||e.target.closest("#mute");
-    // A tap outside the panels closes any open panel (and doesn't also toggle play)
-    if(anyPanelOpen() && !onPanel && !onToggle){ closePanels(); suppressClick=true; }
+    // A tap/click outside the panels closes any open panel.
+    // Only suppress the follow-up play-toggle when the tap landed on the video itself.
+    if(anyPanelOpen() && !onPanel && !onToggle){ closePanels(); if(e.target===video) suppressClick=true; }
     if(e.target.closest("button")||onPanel||e.target.closest("#seek")) return;
     showUI();
   });
