@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AniLiberty Player</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #000; color: #eee;
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  #wrap { display: flex; flex-direction: column; height: 100vh; }
+  #title { padding: 8px 12px; font-size: 14px; opacity: .85; text-align: center; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+  video { width: 100%; height: 100%; background: #000; }
+  #bar { display: flex; gap: 6px; justify-content: center; padding: 8px; flex-wrap: wrap; }
+  .q {
+    background: #2a2a2a; color: #eee; border: 1px solid #444;
+    border-radius: 8px; padding: 6px 14px; font-size: 14px; cursor: pointer;
+  }
+  .q.active { background: #3390ec; border-color: #3390ec; color: #fff; }
+  #msg { padding: 20px; text-align: center; font-size: 15px; line-height: 1.5; }
+  .spin {
+    width: 36px; height: 36px; border: 3px solid #444; border-top-color: #3390ec;
+    border-radius: 50%; animation: r 1s linear infinite; margin: 0 auto 14px;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="title">Загрузка…</div>
+  <div id="stage">
+    <div id="msg"><div class="spin"></div>Получаю серию…</div>
+    <video id="v" controls autoplay playsinline style="display:none"></video>
+  </div>
+  <div id="bar"></div>
+</div>
+
+<script>
+(function () {
+  const API = "https://anilibria.top/api/v1/anime/releases/";
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { tg.ready(); tg.expand(); }
+
+  const params = new URLSearchParams(location.search);
+  const rid = params.get("rid");
+  const ep  = parseFloat(params.get("ep"));
+
+  const titleEl = document.getElementById("title");
+  const msgEl   = document.getElementById("msg");
+  const video   = document.getElementById("v");
+  const bar     = document.getElementById("bar");
+
+  let hls = null;
+  let sources = {};   // {480: url, 720: url, 1080: url}
+
+  function fail(text) {
+    msgEl.style.display = "block";
+    msgEl.innerHTML = "⚠️ " + text;
+    video.style.display = "none";
+  }
+
+  function play(url) {
+    msgEl.style.display = "none";
+    video.style.display = "block";
+    const pos = video.currentTime || 0;
+    if (hls) { hls.destroy(); hls = null; }
+
+    if (window.Hls && Hls.isSupported()) {
+      hls = new Hls({ maxBufferLength: 30 });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (pos > 0) video.currentTime = pos;
+        video.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (e, data) => {
+        if (data.fatal) fail("Не удалось воспроизвести поток. Попробуйте другое качество.");
+      });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      // Native HLS (iOS Safari / Telegram on iOS)
+      video.src = url;
+      video.addEventListener("loadedmetadata", () => {
+        if (pos > 0) video.currentTime = pos;
+        video.play().catch(() => {});
+      }, { once: true });
+    } else {
+      fail("Браузер не поддерживает HLS.");
+    }
+  }
+
+  function buildQuality(active) {
+    bar.innerHTML = "";
+    ["480", "720", "1080"].forEach(q => {
+      if (!sources[q]) return;
+      const b = document.createElement("button");
+      b.className = "q" + (q === active ? " active" : "");
+      b.textContent = q + "p";
+      b.onclick = () => {
+        document.querySelectorAll(".q").forEach(x => x.classList.remove("active"));
+        b.classList.add("active");
+        play(sources[q]);
+      };
+      bar.appendChild(b);
+    });
+  }
+
+  if (!rid || isNaN(ep)) { fail("Не указана серия."); return; }
+
+  fetch(API + encodeURIComponent(rid))
+    .then(r => r.json())
+    .then(data => {
+      const episodes = data.episodes || [];
+      const e = episodes.find(x => parseFloat(x.ordinal) === ep);
+      if (!e) { fail("Серия не найдена."); return; }
+
+      sources = {};
+      if (e.hls_480)  sources["480"]  = e.hls_480;
+      if (e.hls_720)  sources["720"]  = e.hls_720;
+      if (e.hls_1080) sources["1080"] = e.hls_1080;
+
+      const name = (data.name && data.name.main) || "Аниме";
+      const epName = e.name ? " — " + e.name : "";
+      titleEl.textContent = name + " · Серия " + (ep % 1 === 0 ? ep : ep) + epName;
+
+      const best = sources["720"] ? "720" : (sources["480"] ? "480" : "1080");
+      if (!sources[best]) { fail("Нет доступных потоков."); return; }
+      buildQuality(best);
+      play(sources[best]);
+    })
+    .catch(() => fail("Ошибка загрузки данных серии."));
+})();
+</script>
+</body>
+</html>
