@@ -308,8 +308,8 @@
     if (e.code==="Space")      { e.preventDefault(); togglePlay(); }
     else if (e.code==="KeyF")  { fsBtn.click(); }
     else if (e.code==="Escape"){ if (isFS()) exitFullscreen(); }
-    else if (e.code==="ArrowRight"){ if(video.duration) video.currentTime=Math.min(video.duration, video.currentTime+5); showUI(); }
-    else if (e.code==="ArrowLeft") { video.currentTime=Math.max(0, video.currentTime-5); showUI(); }
+    else if (e.code==="ArrowRight"){ if(video.duration) video.currentTime=Math.min(video.duration, video.currentTime+10); showUI(); }
+    else if (e.code==="ArrowLeft") { video.currentTime=Math.max(0, video.currentTime-10); showUI(); }
     else if (e.code==="ArrowUp")   { video.muted=false; video.volume=Math.min(1, (video.volume||0)+0.1); showUI(); }
     else if (e.code==="ArrowDown") { video.muted=false; video.volume=Math.max(0, (video.volume||0)-0.1); showUI(); }
   });
