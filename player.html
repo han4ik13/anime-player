@@ -78,9 +78,15 @@
     pointer-events: auto; }
   #row { display: flex; align-items: center; gap: 12px; }
   .cbtn { flex: none; width: 38px; height: 38px; border: none; background: transparent; color: #fff;
-    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .cbtn svg { width: 24px; height: 24px; display: block; }
   .cbtn:active { opacity: .6; }
   .time { font-size: 13px; font-variant-numeric: tabular-nums; opacity: .9; min-width: 42px; text-align: center; }
+
+  /* Volume */
+  .volwrap { flex: none; display: flex; align-items: center; gap: 2px; }
+  #vol { width: 76px; height: 30px; cursor: pointer; accent-color: #3390ec; }
+  @media (max-width: 600px) { #vol { display: none; } }   /* phones use hardware buttons */
 
   /* Custom seekbar with big touch area */
   #seek { position: relative; flex: 1; height: 38px; cursor: pointer; touch-action: none; }
@@ -127,14 +133,17 @@
 
     <div id="bottom">
       <div id="row">
-        <button class="cbtn" id="playpause">▶</button>
+        <button class="cbtn" id="playpause"></button>
         <span class="time" id="cur">0:00</span>
         <div id="seek">
           <div class="track"></div><div class="buf"></div><div class="fill"></div><div class="thumb"></div>
         </div>
         <span class="time" id="dur">0:00</span>
-        <button class="cbtn" id="mute">🔊</button>
-        <button class="cbtn" id="fs">⛶</button>
+        <div class="volwrap">
+          <button class="cbtn" id="mute"></button>
+          <input id="vol" type="range" min="0" max="1" step="0.01" value="1">
+        </div>
+        <button class="cbtn" id="fs"></button>
       </div>
     </div>
   </div>
@@ -156,8 +165,19 @@
   const $ = id => document.getElementById(id);
   const player=$("player"), video=$("v"), ui=$("ui"), titleEl=$("title"), msg=$("msg"), msgText=$("msgtext");
   const gear=$("gear"), settings=$("settings"), qlist=$("qlist"), prevBtn=$("prev"), nextBtn=$("next"), skipBtn=$("skip");
-  const playpause=$("playpause"), curEl=$("cur"), durEl=$("dur"), muteBtn=$("mute"), fsBtn=$("fs");
+  const playpause=$("playpause"), curEl=$("cur"), durEl=$("dur"), muteBtn=$("mute"), fsBtn=$("fs"), volEl=$("vol");
   const listBtn=$("list"), playlist=$("playlist"), eplist=$("eplist");
+
+  // SVG icons
+  const ICON = {
+    play:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
+    vol:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>',
+    volLow:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3z"/></svg>',
+    mute:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3z"/><path d="M16 8l5 5m0-5l-5 5" stroke="currentColor" stroke-width="2" fill="none"/></svg>',
+    fsOn:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>',
+    fsOff: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>',
+  };
   const seek=$("seek"), fill=seek.querySelector(".fill"), buf=seek.querySelector(".buf"), thumb=seek.querySelector(".thumb");
 
   let hls=null, releaseName="Аниме", episodes=[], sources={}, curQuality=null, curOpening=null, curEnding=null;
@@ -174,9 +194,12 @@
   let hideTimer=null;
   function showUI(){ ui.classList.remove("hidden"); clearTimeout(hideTimer);
     hideTimer=setTimeout(()=>{ if(!video.paused){ ui.classList.add("hidden"); settings.classList.remove("open"); playlist.classList.remove("open"); } },3500); }
-  player.addEventListener("pointerdown", e=>{ if(e.target.closest("button")||e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#seek")) return; showUI(); });
-  video.addEventListener("pause", ()=>{ playpause.textContent="▶"; showUI(); });
-  video.addEventListener("play",  ()=>{ playpause.textContent="⏸"; showUI(); });
+  player.addEventListener("pointerdown", e=>{ if(e.target.closest("button")||e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#seek")||e.target.closest("#vol")) return; showUI(); });
+  function togglePlay(){ if(video.paused) video.play().catch(()=>{}); else video.pause(); showUI(); }
+  // Tap on the video itself toggles play/pause
+  video.addEventListener("click", togglePlay);
+  video.addEventListener("pause", ()=>{ playpause.innerHTML=ICON.play; showUI(); });
+  video.addEventListener("play",  ()=>{ playpause.innerHTML=ICON.pause; showUI(); });
 
   // playback
   function play(url, startAt){
@@ -209,13 +232,47 @@
     });
   }
 
-  // play/pause, mute, fullscreen
-  playpause.onclick=()=>{ video.paused?video.play():video.pause(); };
-  muteBtn.onclick=()=>{ video.muted=!video.muted; muteBtn.textContent=video.muted?"🔇":"🔊"; };
-  fsBtn.onclick=()=>{ const d=document;
-    if(d.fullscreenElement||d.webkitFullscreenElement){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); }
-    else if(player.requestFullscreen){ player.requestFullscreen().catch(()=>{ if(video.webkitEnterFullscreen) video.webkitEnterFullscreen(); }); }
-    else if(video.webkitEnterFullscreen){ video.webkitEnterFullscreen(); } };
+  // play/pause
+  playpause.onclick=togglePlay;
+  playpause.innerHTML=ICON.play;
+
+  // volume + mute
+  function renderVolIcon(){
+    if(video.muted||video.volume===0) muteBtn.innerHTML=ICON.mute;
+    else if(video.volume<0.5)         muteBtn.innerHTML=ICON.volLow;
+    else                              muteBtn.innerHTML=ICON.vol;
+  }
+  muteBtn.onclick=()=>{ video.muted=!video.muted; if(!video.muted && video.volume===0) video.volume=0.5; showUI(); };
+  volEl.addEventListener("input", ()=>{ video.muted=false; video.volume=parseFloat(volEl.value); showUI(); });
+  video.addEventListener("volumechange", ()=>{ volEl.value=video.muted?0:video.volume; renderVolIcon(); });
+  renderVolIcon();
+
+  // fullscreen — Telegram API first, then DOM Fullscreen, then iOS native
+  fsBtn.innerHTML=ICON.fsOff;
+  function isFS(){ return !!(document.fullscreenElement||document.webkitFullscreenElement||(tg&&tg.isFullscreen)); }
+  function syncFsIcon(){ fsBtn.innerHTML=isFS()?ICON.fsOn:ICON.fsOff; }
+  document.addEventListener("fullscreenchange", syncFsIcon);
+  document.addEventListener("webkitfullscreenchange", syncFsIcon);
+  fsBtn.onclick=()=>{
+    showUI();
+    try {
+      if(tg && typeof tg.requestFullscreen==="function" && tg.isVersionAtLeast && tg.isVersionAtLeast("8.0")){
+        if(tg.isFullscreen){ tg.exitFullscreen(); } else { tg.requestFullscreen(); }
+        return;
+      }
+    } catch(e){}
+    const d=document, el=player;
+    if(d.fullscreenElement||d.webkitFullscreenElement){
+      (d.exitFullscreen||d.webkitExitFullscreen||function(){}).call(d);
+    } else if(el.requestFullscreen){
+      el.requestFullscreen().catch(()=>{ if(video.webkitEnterFullscreen) video.webkitEnterFullscreen(); });
+    } else if(el.webkitRequestFullscreen){
+      el.webkitRequestFullscreen();
+    } else if(video.webkitEnterFullscreen){
+      video.webkitEnterFullscreen();
+    }
+    setTimeout(syncFsIcon, 300);
+  };
 
   // seekbar
   let scrubbing=false;
