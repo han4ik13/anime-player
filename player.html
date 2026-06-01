@@ -2,138 +2,256 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>AniLiberty Player</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 <style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   :root { color-scheme: dark; }
   html, body {
-    margin: 0; padding: 0; height: 100%;
-    background: #000; color: #eee;
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000; color: #fff; overflow: hidden; overscroll-behavior: none;
     font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   }
-  #wrap { display: flex; flex-direction: column; height: 100vh; }
-  #title { padding: 8px 12px; font-size: 14px; opacity: .85; text-align: center; }
-  #stage { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
-  video { width: 100%; height: 100%; background: #000; }
-  #bar { display: flex; gap: 6px; justify-content: center; padding: 8px; flex-wrap: wrap; }
-  .q {
-    background: #2a2a2a; color: #eee; border: 1px solid #444;
-    border-radius: 8px; padding: 6px 14px; font-size: 14px; cursor: pointer;
+  #player { position: fixed; inset: 0; background: #000; }
+  video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+
+  /* Overlay layer (auto-hides) */
+  #ui { position: absolute; inset: 0; pointer-events: none; transition: opacity .25s; }
+  #ui.hidden { opacity: 0; }
+
+  /* Top bar with title */
+  #top {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top) + 10px) 14px 26px;
+    background: linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,0));
+    display: flex; align-items: center; gap: 10px; pointer-events: auto;
   }
-  .q.active { background: #3390ec; border-color: #3390ec; color: #fff; }
-  #msg { padding: 20px; text-align: center; font-size: 15px; line-height: 1.5; }
-  .spin {
-    width: 36px; height: 36px; border: 3px solid #444; border-top-color: #3390ec;
-    border-radius: 50%; animation: r 1s linear infinite; margin: 0 auto 14px;
+  #title { flex: 1; font-size: 14px; font-weight: 600; line-height: 1.3;
+           text-shadow: 0 1px 4px rgba(0,0,0,.8); overflow: hidden;
+           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .icon {
+    flex: none; width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(40,40,40,.65); border: none; color: #fff;
+    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(6px);
   }
+  .icon:active { background: rgba(80,80,80,.8); }
+
+  /* Center prev/next + play hint */
+  #center {
+    position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px; pointer-events: none;
+  }
+  .nav {
+    pointer-events: auto; width: 56px; height: 56px; border-radius: 50%;
+    background: rgba(30,30,30,.55); border: none; color: #fff; font-size: 26px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(6px);
+  }
+  .nav:disabled { opacity: .25; pointer-events: none; }
+  .nav:active { background: rgba(70,70,70,.8); }
+
+  /* Settings (quality) panel */
+  #settings {
+    position: absolute; right: 12px; top: calc(env(safe-area-inset-top) + 58px);
+    background: rgba(28,28,30,.96); border-radius: 14px; padding: 6px;
+    min-width: 150px; pointer-events: auto; display: none;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  }
+  #settings.open { display: block; }
+  #settings .hd { font-size: 12px; opacity: .6; padding: 6px 12px 4px; }
+  .qrow {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border-radius: 9px; cursor: pointer; font-size: 15px;
+  }
+  .qrow:active { background: rgba(255,255,255,.08); }
+  .qrow .check { width: 16px; opacity: 0; }
+  .qrow.active .check { opacity: 1; color: #3390ec; }
+  .qrow.active { color: #3390ec; }
+
+  /* Messages / spinner */
+  #msg {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center;
+    padding: 24px; font-size: 15px; pointer-events: none;
+  }
+  #msg.hidden { display: none; }
+  .spin { width: 40px; height: 40px; border: 3px solid #444; border-top-color: #3390ec;
+          border-radius: 50%; animation: r 1s linear infinite; }
   @keyframes r { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="title">Загрузка…</div>
-  <div id="stage">
-    <div id="msg"><div class="spin"></div>Получаю серию…</div>
-    <video id="v" controls autoplay playsinline style="display:none"></video>
+<div id="player">
+  <video id="v" playsinline webkit-playsinline></video>
+
+  <div id="ui">
+    <div id="top">
+      <div id="title">Загрузка…</div>
+      <button class="icon" id="gear" title="Качество">⚙</button>
+    </div>
+
+    <div id="center">
+      <button class="nav" id="prev" title="Предыдущая">‹</button>
+      <button class="nav" id="next" title="Следующая">›</button>
+    </div>
+
+    <div id="settings">
+      <div class="hd">Качество</div>
+      <div id="qlist"></div>
+    </div>
   </div>
-  <div id="bar"></div>
+
+  <div id="msg"><div class="spin"></div><div id="msgtext">Получаю серию…</div></div>
 </div>
 
 <script>
 (function () {
   const API = "https://anilibria.top/api/v1/anime/releases/";
   const tg = window.Telegram && window.Telegram.WebApp;
-  if (tg) { tg.ready(); tg.expand(); }
+  if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor("#000000"); } catch (e) {} }
 
   const params = new URLSearchParams(location.search);
   const rid = params.get("rid");
-  const ep  = parseFloat(params.get("ep"));
+  let curOrd = parseFloat(params.get("ep"));
 
-  const titleEl = document.getElementById("title");
-  const msgEl   = document.getElementById("msg");
   const video   = document.getElementById("v");
-  const bar     = document.getElementById("bar");
+  const ui      = document.getElementById("ui");
+  const titleEl = document.getElementById("title");
+  const msg     = document.getElementById("msg");
+  const msgText = document.getElementById("msgtext");
+  const gear    = document.getElementById("gear");
+  const settings= document.getElementById("settings");
+  const qlist   = document.getElementById("qlist");
+  const prevBtn = document.getElementById("prev");
+  const nextBtn = document.getElementById("next");
 
   let hls = null;
-  let sources = {};   // {480: url, 720: url, 1080: url}
+  let releaseName = "Аниме";
+  let episodes = [];      // sorted ascending by ordinal
+  let sources = {};       // {480,720,1080}
+  let curQuality = null;
 
-  function fail(text) {
-    msgEl.style.display = "block";
-    msgEl.innerHTML = "⚠️ " + text;
-    video.style.display = "none";
+  const fmt = n => (n % 1 === 0 ? String(n) : String(n));
+
+  function showMsg(text, spin) {
+    msg.classList.remove("hidden");
+    msg.querySelector(".spin").style.display = spin ? "block" : "none";
+    msgText.textContent = text;
   }
+  function hideMsg() { msg.classList.add("hidden"); }
 
-  function play(url) {
-    msgEl.style.display = "none";
-    video.style.display = "block";
-    const pos = video.currentTime || 0;
+  // ── Auto-hide overlay ───────────────────────────────────────────────
+  let hideTimer = null;
+  function showUI() {
+    ui.classList.remove("hidden");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!video.paused) { ui.classList.add("hidden"); settings.classList.remove("open"); }
+    }, 3500);
+  }
+  document.getElementById("player").addEventListener("click", e => {
+    if (e.target.closest("button") || e.target.closest("#settings")) return;
+    if (ui.classList.contains("hidden")) { showUI(); }
+    else { video.paused ? video.play() : video.pause(); showUI(); }
+  });
+  video.addEventListener("pause", showUI);
+  video.addEventListener("play", showUI);
+
+  // ── Playback ────────────────────────────────────────────────────────
+  function play(url, keepPos) {
+    const pos = keepPos ? (video.currentTime || 0) : 0;
     if (hls) { hls.destroy(); hls = null; }
-
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({ maxBufferLength: 30 });
       hls.loadSource(url);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (pos > 0) video.currentTime = pos;
-        video.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (e, data) => {
-        if (data.fatal) fail("Не удалось воспроизвести поток. Попробуйте другое качество.");
-      });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => { if (pos) video.currentTime = pos; video.play().catch(()=>{}); });
+      hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) showMsg("Ошибка потока. Смените качество.", false); });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Native HLS (iOS Safari / Telegram on iOS)
       video.src = url;
-      video.addEventListener("loadedmetadata", () => {
-        if (pos > 0) video.currentTime = pos;
-        video.play().catch(() => {});
-      }, { once: true });
+      video.addEventListener("loadedmetadata", () => { if (pos) video.currentTime = pos; video.play().catch(()=>{}); }, { once: true });
     } else {
-      fail("Браузер не поддерживает HLS.");
+      showMsg("Браузер не поддерживает HLS.", false);
     }
   }
 
-  function buildQuality(active) {
-    bar.innerHTML = "";
-    ["480", "720", "1080"].forEach(q => {
+  function setQuality(q, keepPos) {
+    if (!sources[q]) return;
+    curQuality = q;
+    buildQualityList();
+    settings.classList.remove("open");
+    play(sources[q], keepPos);
+  }
+
+  function buildQualityList() {
+    qlist.innerHTML = "";
+    ["1080","720","480"].forEach(q => {
       if (!sources[q]) return;
-      const b = document.createElement("button");
-      b.className = "q" + (q === active ? " active" : "");
-      b.textContent = q + "p";
-      b.onclick = () => {
-        document.querySelectorAll(".q").forEach(x => x.classList.remove("active"));
-        b.classList.add("active");
-        play(sources[q]);
-      };
-      bar.appendChild(b);
+      const row = document.createElement("div");
+      row.className = "qrow" + (q === curQuality ? " active" : "");
+      row.innerHTML = '<span class="check">✓</span><span>' + q + 'p</span>';
+      row.onclick = () => setQuality(q, true);
+      qlist.appendChild(row);
     });
   }
 
-  if (!rid || isNaN(ep)) { fail("Не указана серия."); return; }
+  gear.onclick = () => { settings.classList.toggle("open"); showUI(); };
+
+  // ── Episode switching ───────────────────────────────────────────────
+  function curIndex() { return episodes.findIndex(e => parseFloat(e.ordinal) === curOrd); }
+
+  function updateNav() {
+    const i = curIndex();
+    prevBtn.disabled = i <= 0;
+    nextBtn.disabled = i < 0 || i >= episodes.length - 1;
+  }
+
+  function loadEpisode(ordinal, keepQuality) {
+    const e = episodes.find(x => parseFloat(x.ordinal) === ordinal);
+    if (!e) { showMsg("Серия не найдена.", false); return; }
+    curOrd = ordinal;
+    sources = {};
+    if (e.hls_480)  sources["480"]  = e.hls_480;
+    if (e.hls_720)  sources["720"]  = e.hls_720;
+    if (e.hls_1080) sources["1080"] = e.hls_1080;
+
+    titleEl.textContent = releaseName + " · Серия " + fmt(ordinal) + (e.name ? " — " + e.name : "");
+    history.replaceState(null, "", "?rid=" + rid + "&ep=" + ordinal);
+
+    const q = (keepQuality && sources[curQuality]) ? curQuality
+            : (sources["720"] ? "720" : (sources["480"] ? "480" : "1080"));
+    if (!sources[q]) { showMsg("Нет доступных потоков.", false); return; }
+    hideMsg();
+    updateNav();
+    setQuality(q, false);
+    showUI();
+  }
+
+  prevBtn.onclick = () => { const i = curIndex(); if (i > 0) loadEpisode(parseFloat(episodes[i-1].ordinal), true); };
+  nextBtn.onclick = () => { const i = curIndex(); if (i >= 0 && i < episodes.length-1) loadEpisode(parseFloat(episodes[i+1].ordinal), true); };
+
+  // Auto-advance to next episode when one ends
+  video.addEventListener("ended", () => {
+    const i = curIndex();
+    if (i >= 0 && i < episodes.length - 1) loadEpisode(parseFloat(episodes[i+1].ordinal), true);
+  });
+
+  // ── Init ────────────────────────────────────────────────────────────
+  if (!rid || isNaN(curOrd)) { showMsg("Не указана серия.", false); return; }
 
   fetch(API + encodeURIComponent(rid))
     .then(r => r.json())
     .then(data => {
-      const episodes = data.episodes || [];
-      const e = episodes.find(x => parseFloat(x.ordinal) === ep);
-      if (!e) { fail("Серия не найдена."); return; }
-
-      sources = {};
-      if (e.hls_480)  sources["480"]  = e.hls_480;
-      if (e.hls_720)  sources["720"]  = e.hls_720;
-      if (e.hls_1080) sources["1080"] = e.hls_1080;
-
-      const name = (data.name && data.name.main) || "Аниме";
-      const epName = e.name ? " — " + e.name : "";
-      titleEl.textContent = name + " · Серия " + (ep % 1 === 0 ? ep : ep) + epName;
-
-      const best = sources["720"] ? "720" : (sources["480"] ? "480" : "1080");
-      if (!sources[best]) { fail("Нет доступных потоков."); return; }
-      buildQuality(best);
-      play(sources[best]);
+      releaseName = (data.name && data.name.main) || "Аниме";
+      episodes = (data.episodes || []).slice().sort((a,b) => parseFloat(a.ordinal) - parseFloat(b.ordinal));
+      if (!episodes.length) { showMsg("Серии недоступны.", false); return; }
+      loadEpisode(curOrd, false);
     })
-    .catch(() => fail("Ошибка загрузки данных серии."));
+    .catch(() => showMsg("Ошибка загрузки данных.", false));
 })();
 </script>
 </body>
