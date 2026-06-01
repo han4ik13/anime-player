@@ -83,10 +83,13 @@
   .cbtn:active { opacity: .6; }
   .time { font-size: 13px; font-variant-numeric: tabular-nums; opacity: .9; min-width: 42px; text-align: center; }
 
-  /* Volume */
-  .volwrap { flex: none; display: flex; align-items: center; gap: 2px; }
-  #vol { width: 76px; height: 30px; cursor: pointer; accent-color: #3390ec; }
-  @media (max-width: 600px) { #vol { display: none; } }   /* phones use hardware buttons */
+  /* Volume popup (appears above the volume button on tap) */
+  #volpop { position: absolute; right: 56px; bottom: calc(env(safe-area-inset-bottom) + 70px);
+    background: rgba(28,28,30,.97); border-radius: 12px; padding: 8px 12px;
+    display: none; align-items: center; gap: 8px; pointer-events: auto;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 6; }
+  #volpop.open { display: flex; }
+  #vol { width: 130px; height: 30px; cursor: pointer; accent-color: #3390ec; }
 
   /* Custom seekbar with big touch area */
   #seek { position: relative; flex: 1; height: 38px; cursor: pointer; touch-action: none; }
@@ -139,11 +142,12 @@
           <div class="track"></div><div class="buf"></div><div class="fill"></div><div class="thumb"></div>
         </div>
         <span class="time" id="dur">0:00</span>
-        <div class="volwrap">
-          <button class="cbtn" id="mute"></button>
-          <input id="vol" type="range" min="0" max="1" step="0.01" value="1">
-        </div>
+        <button class="cbtn" id="mute"></button>
         <button class="cbtn" id="fs"></button>
+      </div>
+      <div id="volpop">
+        <button class="cbtn" id="muteToggle"></button>
+        <input id="vol" type="range" min="0" max="1" step="0.01" value="1">
       </div>
     </div>
   </div>
@@ -166,6 +170,7 @@
   const player=$("player"), video=$("v"), ui=$("ui"), titleEl=$("title"), msg=$("msg"), msgText=$("msgtext");
   const gear=$("gear"), settings=$("settings"), qlist=$("qlist"), prevBtn=$("prev"), nextBtn=$("next"), skipBtn=$("skip");
   const playpause=$("playpause"), curEl=$("cur"), durEl=$("dur"), muteBtn=$("mute"), fsBtn=$("fs"), volEl=$("vol");
+  const volpop=$("volpop"), muteToggle=$("muteToggle");
   const listBtn=$("list"), playlist=$("playlist"), eplist=$("eplist");
 
   // SVG icons
@@ -193,8 +198,8 @@
   // overlay auto-hide
   let hideTimer=null;
   function showUI(){ ui.classList.remove("hidden"); clearTimeout(hideTimer);
-    hideTimer=setTimeout(()=>{ if(!video.paused){ ui.classList.add("hidden"); settings.classList.remove("open"); playlist.classList.remove("open"); } },3500); }
-  player.addEventListener("pointerdown", e=>{ if(e.target.closest("button")||e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#seek")||e.target.closest("#vol")) return; showUI(); });
+    hideTimer=setTimeout(()=>{ if(!video.paused){ ui.classList.add("hidden"); settings.classList.remove("open"); playlist.classList.remove("open"); volpop.classList.remove("open"); } },3500); }
+  player.addEventListener("pointerdown", e=>{ if(e.target.closest("button")||e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#seek")||e.target.closest("#volpop")) return; showUI(); });
   function togglePlay(){ if(video.paused) video.play().catch(()=>{}); else video.pause(); showUI(); }
   // Tap on the video itself toggles play/pause
   video.addEventListener("click", togglePlay);
@@ -236,13 +241,13 @@
   playpause.onclick=togglePlay;
   playpause.innerHTML=ICON.play;
 
-  // volume + mute
+  // volume — tap speaker opens a slider popup; toggle button mutes
   function renderVolIcon(){
-    if(video.muted||video.volume===0) muteBtn.innerHTML=ICON.mute;
-    else if(video.volume<0.5)         muteBtn.innerHTML=ICON.volLow;
-    else                              muteBtn.innerHTML=ICON.vol;
+    const ic = (video.muted||video.volume===0) ? ICON.mute : (video.volume<0.5 ? ICON.volLow : ICON.vol);
+    muteBtn.innerHTML=ic; muteToggle.innerHTML=ic;
   }
-  muteBtn.onclick=()=>{ video.muted=!video.muted; if(!video.muted && video.volume===0) video.volume=0.5; showUI(); };
+  muteBtn.onclick=()=>{ settings.classList.remove("open"); playlist.classList.remove("open"); volpop.classList.toggle("open"); showUI(); };
+  muteToggle.onclick=()=>{ video.muted=!video.muted; if(!video.muted && video.volume===0) video.volume=0.5; showUI(); };
   volEl.addEventListener("input", ()=>{ video.muted=false; video.volume=parseFloat(volEl.value); showUI(); });
   video.addEventListener("volumechange", ()=>{ volEl.value=video.muted?0:video.volume; renderVolIcon(); });
   renderVolIcon();
