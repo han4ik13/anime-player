@@ -218,10 +218,21 @@
   let hideTimer=null;
   function showUI(){ ui.classList.remove("hidden"); clearTimeout(hideTimer);
     hideTimer=setTimeout(()=>{ if(!video.paused){ ui.classList.add("hidden"); settings.classList.remove("open"); playlist.classList.remove("open"); volpop.classList.remove("open"); } },3500); }
-  player.addEventListener("pointerdown", e=>{ if(e.target.closest("button")||e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#seek")||e.target.closest("#volpop")) return; showUI(); });
+  function anyPanelOpen(){ return settings.classList.contains("open")||playlist.classList.contains("open")||volpop.classList.contains("open"); }
+  function closePanels(){ settings.classList.remove("open"); playlist.classList.remove("open"); volpop.classList.remove("open"); }
+
+  let suppressClick=false;
+  player.addEventListener("pointerdown", e=>{
+    const onPanel  = e.target.closest("#settings")||e.target.closest("#playlist")||e.target.closest("#volpop");
+    const onToggle = e.target.closest("#gear")||e.target.closest("#list")||e.target.closest("#mute");
+    // A tap outside the panels closes any open panel (and doesn't also toggle play)
+    if(anyPanelOpen() && !onPanel && !onToggle){ closePanels(); suppressClick=true; }
+    if(e.target.closest("button")||onPanel||e.target.closest("#seek")) return;
+    showUI();
+  });
   function togglePlay(){ if(video.paused) video.play().catch(()=>{}); else video.pause(); showUI(); }
-  // Tap on the video itself toggles play/pause
-  video.addEventListener("click", togglePlay);
+  // Tap on the video toggles play/pause (unless that tap just dismissed a panel)
+  video.addEventListener("click", ()=>{ if(suppressClick){ suppressClick=false; return; } togglePlay(); });
   video.addEventListener("pause", ()=>{ playpause.innerHTML=ICON.play; showUI(); });
   video.addEventListener("play",  ()=>{ playpause.innerHTML=ICON.pause; showUI(); });
 
