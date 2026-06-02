@@ -189,6 +189,7 @@
   const params = new URLSearchParams(location.search);
   const rid = params.get("rid");
   let curOrd = parseFloat(params.get("ep"));
+  const apiBase = params.get("api");  // bot backend (cloudflared tunnel) for progress sync
 
   const $ = id => document.getElementById(id);
   const player=$("player"), video=$("v"), ui=$("ui"), titleEl=$("title"), msg=$("msg"), msgText=$("msgtext");
@@ -213,7 +214,16 @@
   const posKey = ord => "alib_pos_" + rid + "_" + ord;
   const watchedKey = "alib_watched_" + rid;
   function getWatched(){ try { return new Set(JSON.parse(localStorage.getItem(watchedKey) || "[]")); } catch(e){ return new Set(); } }
-  function markWatched(ord){ const s=getWatched(); if(!s.has(ord)){ s.add(ord); localStorage.setItem(watchedKey, JSON.stringify([...s])); buildPlaylist(); } }
+  function reportWatched(ord){
+    if(!apiBase || !tg || !tg.initData) return;
+    try {
+      fetch(apiBase.replace(/\/$/,"") + "/api/watched", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ init_data: tg.initData, release_id: Number(rid), episode: ord }),
+      }).catch(()=>{});
+    } catch(e){}
+  }
+  function markWatched(ord){ const s=getWatched(); if(!s.has(ord)){ s.add(ord); localStorage.setItem(watchedKey, JSON.stringify([...s])); buildPlaylist(); reportWatched(ord); } }
   const fmtT = s => { s=Math.floor(s||0); const m=Math.floor(s/60); return m+":"+String(s%60).padStart(2,"0"); };
 
   function showMsg(t,sp){ msg.classList.remove("hidden"); msg.querySelector(".spin").style.display=sp?"block":"none"; msgText.textContent=t; }
