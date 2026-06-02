@@ -214,15 +214,18 @@
   const posKey = ord => "alib_pos_" + rid + "_" + ord;
   const watchedKey = "alib_watched_" + rid;
   function getWatched(){ try { return new Set(JSON.parse(localStorage.getItem(watchedKey) || "[]")); } catch(e){ return new Set(); } }
-  function reportWatched(ord){
+  function postWatched(payload){
     if(!apiBase || !tg || !tg.initData) return;
     try {
       fetch(apiBase.replace(/\/$/,"") + "/api/watched", {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ init_data: tg.initData, release_id: Number(rid), episode: ord }),
+        body: JSON.stringify(Object.assign({ init_data: tg.initData, release_id: Number(rid) }, payload)),
       }).catch(()=>{});
     } catch(e){}
   }
+  function reportWatched(ord){ postWatched({ episode: ord }); }
+  // Push the whole localStorage watched list to the bot (sync existing ✓ on open)
+  function syncAllWatched(){ const arr=[...getWatched()]; if(arr.length) postWatched({ watched: arr }); }
   function markWatched(ord){ const s=getWatched(); if(!s.has(ord)){ s.add(ord); localStorage.setItem(watchedKey, JSON.stringify([...s])); buildPlaylist(); reportWatched(ord); } }
   const fmtT = s => { s=Math.floor(s||0); const m=Math.floor(s/60); return m+":"+String(s%60).padStart(2,"0"); };
 
@@ -403,6 +406,7 @@
 
   // init
   if(!rid||isNaN(curOrd)){ showMsg("Не указана серия.",false); return; }
+  syncAllWatched();  // push any existing local ✓ marks to the bot on open
   fetch(API+encodeURIComponent(rid)).then(r=>r.json()).then(data=>{
     releaseName=(data.name&&data.name.main)||"Аниме";
     episodes=(data.episodes||[]).slice().sort((a,b)=>parseFloat(a.ordinal)-parseFloat(b.ordinal));
