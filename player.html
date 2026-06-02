@@ -104,13 +104,13 @@
   #seek .thumb { position: absolute; top: 50%; left: 0; width: 15px; height: 15px; border-radius: 50%;
     background: #3390ec; transform: translate(-50%, -50%); box-shadow: 0 0 0 4px rgba(51,144,236,.25); }
 
-  /* Skip-opening */
-  #skip { position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 96px);
+  /* Skip opening / ending */
+  #skip, #skipEnd { position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 96px);
     background: rgba(20,20,20,.8); color: #fff; border: 1px solid rgba(255,255,255,.28);
     border-radius: 10px; padding: 11px 18px; font-size: 15px; font-weight: 600; cursor: pointer;
     pointer-events: auto; display: none; backdrop-filter: blur(6px); z-index: 4; }
-  #skip.show { display: block; }
-  #skip:active { background: rgba(60,60,60,.9); }
+  #skip.show, #skipEnd.show { display: block; }
+  #skip:active, #skipEnd:active { background: rgba(60,60,60,.9); }
 
   #msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 14px; text-align: center; padding: 24px; font-size: 15px; pointer-events: none; }
@@ -155,6 +155,7 @@
   </div>
 
   <button id="skip">Пропустить опенинг</button>
+  <button id="skipEnd">Пропустить эндинг</button>
   <div id="msg"><div class="spin"></div><div id="msgtext">Получаю серию…</div></div>
 </div>
 
@@ -194,7 +195,7 @@
   const gear=$("gear"), settings=$("settings"), qlist=$("qlist"), prevBtn=$("prev"), nextBtn=$("next"), skipBtn=$("skip");
   const playpause=$("playpause"), curEl=$("cur"), durEl=$("dur"), muteBtn=$("mute"), fsBtn=$("fs"), volEl=$("vol");
   const volpop=$("volpop"), muteToggle=$("muteToggle");
-  const listBtn=$("list"), playlist=$("playlist"), eplist=$("eplist");
+  const listBtn=$("list"), playlist=$("playlist"), eplist=$("eplist"), skipEndBtn=$("skipEnd");
 
   // SVG icons
   const ICON = {
@@ -350,6 +351,8 @@
     if(!scrubbing){ if(video.duration){ setProgress(t/video.duration); curEl.textContent=fmtT(t); } }
     if(Math.abs(t-lastSave)>4){ lastSave=t; if(t>5&&video.duration&&t<video.duration-5) localStorage.setItem(posKey(curOrd),String(t)); }
     if(curOpening && t>=curOpening.start && t<curOpening.stop-0.5) skipBtn.classList.add("show"); else skipBtn.classList.remove("show");
+    // Show "skip ending" while inside the ending interval (until just before its end, so post-credit scenes remain)
+    if(curEnding && curEnding.stop!=null && t>=curEnding.start && t<curEnding.stop-0.5) skipEndBtn.classList.add("show"); else skipEndBtn.classList.remove("show");
     checkWatched();
   });
   // Mark watched once playback reaches the ending and beyond (covers seeking into/past it)
@@ -360,6 +363,11 @@
   }
   video.addEventListener("seeked", checkWatched);
   skipBtn.onclick=()=>{ if(curOpening){ video.currentTime=curOpening.stop; skipBtn.classList.remove("show"); } };
+  skipEndBtn.onclick=()=>{ if(!curEnding) return; markWatched(curOrd); skipEndBtn.classList.remove("show");
+    // If there is content after the ending — jump to its end; otherwise go to next episode
+    if(video.duration && curEnding.stop < video.duration-1){ video.currentTime=curEnding.stop; }
+    else { const i=curIndex(); if(i>=0&&i<episodes.length-1) loadEpisode(parseFloat(episodes[i+1].ordinal),true); }
+  };
 
   // episodes
   function curIndex(){ return episodes.findIndex(e=>parseFloat(e.ordinal)===curOrd); }
@@ -369,7 +377,7 @@
     curOrd=ordinal; sources={};
     if(e.hls_480) sources["480"]=e.hls_480; if(e.hls_720) sources["720"]=e.hls_720; if(e.hls_1080) sources["1080"]=e.hls_1080;
     curOpening=(e.opening&&e.opening.start!=null&&e.opening.stop!=null)?e.opening:null; skipBtn.classList.remove("show");
-    curEnding=(e.ending&&e.ending.start!=null)?e.ending:null;
+    curEnding=(e.ending&&e.ending.start!=null)?e.ending:null; skipEndBtn.classList.remove("show");
     titleEl.textContent=releaseName+" · Серия "+ordinal+(e.name?" — "+e.name:"");
     history.replaceState(null,"","?rid="+rid+"&ep="+ordinal);
     setProgress(0); curEl.textContent="0:00"; buf.style.width="0";
