@@ -181,6 +181,10 @@
     });
   }
 
+  // iOS blocks programmatic volume (HTMLMediaElement.volume is read-only there) — only mute works
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+                (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
   const params = new URLSearchParams(location.search);
   const rid = params.get("rid");
   let curOrd = parseFloat(params.get("ep"));
@@ -277,6 +281,8 @@
     const ic = (video.muted||video.volume===0) ? ICON.mute : (video.volume<0.5 ? ICON.volLow : ICON.vol);
     muteBtn.innerHTML=ic; muteToggle.innerHTML=ic;
   }
+  // iOS controls volume via hardware buttons / its native player — hide the web volume button there
+  if(isIOS){ muteBtn.style.display="none"; }
   muteBtn.onclick=()=>{ settings.classList.remove("open"); playlist.classList.remove("open"); volpop.classList.toggle("open"); showUI(); };
   muteToggle.onclick=()=>{ video.muted=!video.muted; if(!video.muted && video.volume===0) video.volume=0.5; showUI(); };
   volEl.addEventListener("input", ()=>{ video.muted=false; video.volume=parseFloat(volEl.value); showUI(); });
@@ -344,10 +350,15 @@
     if(!scrubbing){ if(video.duration){ setProgress(t/video.duration); curEl.textContent=fmtT(t); } }
     if(Math.abs(t-lastSave)>4){ lastSave=t; if(t>5&&video.duration&&t<video.duration-5) localStorage.setItem(posKey(curOrd),String(t)); }
     if(curOpening && t>=curOpening.start && t<curOpening.stop-0.5) skipBtn.classList.add("show"); else skipBtn.classList.remove("show");
-    // Mark watched once playback reaches the ending (±5s) or the very end
-    if(curEnding && t>=curEnding.start-5) markWatched(curOrd);
-    else if(video.duration && t>=video.duration-5) markWatched(curOrd);
+    checkWatched();
   });
+  // Mark watched once playback reaches the ending and beyond (covers seeking into/past it)
+  function checkWatched(){
+    const t=video.currentTime||0;
+    if(curEnding && t>=curEnding.start) markWatched(curOrd);
+    else if(video.duration && t>=video.duration-5) markWatched(curOrd);
+  }
+  video.addEventListener("seeked", checkWatched);
   skipBtn.onclick=()=>{ if(curOpening){ video.currentTime=curOpening.stop; skipBtn.classList.remove("show"); } };
 
   // episodes
