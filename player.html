@@ -394,11 +394,13 @@
     if(curEnding && curEnding.stop!=null && t>=curEnding.start && t<curEnding.stop-0.5) skipEndBtn.classList.add("show"); else skipEndBtn.classList.remove("show");
     checkWatched();
   });
-  // Mark watched once playback reaches the ending and beyond (covers seeking into/past it)
+  // Mark watched once playback reaches the ending, OR ~90% of the episode, OR the last
+  // 20s — so it counts even when the episode has no ending metadata and the viewer
+  // doesn't sit through the final credits (no need to press "skip ending").
   function checkWatched(){
-    const t=video.currentTime||0;
-    if(curEnding && t>=curEnding.start) markWatched(curOrd);
-    else if(video.duration && t>=video.duration-5) markWatched(curOrd);
+    const t=video.currentTime||0, d=video.duration||0;
+    if(!d) return;
+    if((curEnding && t>=curEnding.start) || t>=d*0.9 || t>=d-20) markWatched(curOrd);
   }
   video.addEventListener("seeked", checkWatched);
   skipBtn.onclick=()=>{ if(curOpening){ video.currentTime=curOpening.stop; skipBtn.classList.remove("show"); } };
