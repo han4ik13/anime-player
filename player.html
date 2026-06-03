@@ -336,24 +336,43 @@
   fsBtn.onclick=()=>{ showUI(); if (isFS()) exitFullscreen(); else enterFullscreen(); setTimeout(syncFsIcon, 300); };
   if (tg && tg.onEvent) { try { tg.onEvent("fullscreenChanged", syncFsIcon); } catch(e){} }
 
-  // Picture-in-Picture — standard API, with iOS webkit fallback. Hidden where unsupported.
+  // Picture-in-Picture — standard API (desktop/Android) + iOS webkit, with a native
+  // fullscreen fallback on iOS. Support is re-checked after the video loads, because
+  // iOS reports webkitSupportsPresentationMode=false until a source is attached.
   pipBtn.innerHTML=ICON.pip;
-  const pipWebkit = (typeof video.webkitSupportsPresentationMode==="function" &&
-                     video.webkitSupportsPresentationMode("picture-in-picture"));
-  const pipSupported = (document.pictureInPictureEnabled && !video.disablePictureInPicture) || pipWebkit;
-  if(!pipSupported){ pipBtn.style.display="none"; }
+  function pipWebkitSupported(){
+    return typeof video.webkitSupportsPresentationMode==="function" &&
+           typeof video.webkitSetPresentationMode==="function" &&
+           video.webkitSupportsPresentationMode("picture-in-picture");
+  }
+  function pipStdSupported(){
+    return !!document.pictureInPictureEnabled && !video.disablePictureInPicture;
+  }
+  function updatePipBtn(){
+    // On iOS always offer the button — even without in-webview PiP we can hand off to
+    // the native player (which has its own PiP control).
+    const show = pipStdSupported() || pipWebkitSupported() ||
+                 (isIOS && typeof video.webkitEnterFullscreen==="function");
+    pipBtn.style.display = show ? "" : "none";
+  }
+  updatePipBtn();
+  video.addEventListener("loadedmetadata", updatePipBtn);
   function inPiP(){
     return document.pictureInPictureElement===video ||
            (video.webkitPresentationMode==="picture-in-picture");
   }
   async function togglePiP(){
     try{
-      if(pipWebkit){
+      if(pipWebkitSupported()){
         video.webkitSetPresentationMode(inPiP() ? "inline" : "picture-in-picture");
         return;
       }
-      if(document.pictureInPictureElement) await document.exitPictureInPicture();
-      else await video.requestPictureInPicture();
+      if(document.pictureInPictureElement){ await document.exitPictureInPicture(); return; }
+      if(document.pictureInPictureEnabled && video.requestPictureInPicture){
+        await video.requestPictureInPicture(); return;
+      }
+      // iOS without in-webview PiP: open the native player (has a system PiP button)
+      if(typeof video.webkitEnterFullscreen==="function"){ video.webkitEnterFullscreen(); }
     }catch(e){}
   }
   pipBtn.onclick=()=>{ showUI(); togglePiP(); };
