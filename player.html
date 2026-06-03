@@ -145,7 +145,6 @@
         </div>
         <span class="time" id="dur">0:00</span>
         <button class="cbtn" id="mute"></button>
-        <button class="cbtn" id="pip"></button>
         <button class="cbtn" id="fs"></button>
       </div>
       <div id="volpop">
@@ -195,7 +194,7 @@
   const $ = id => document.getElementById(id);
   const player=$("player"), video=$("v"), ui=$("ui"), titleEl=$("title"), msg=$("msg"), msgText=$("msgtext");
   const gear=$("gear"), settings=$("settings"), qlist=$("qlist"), prevBtn=$("prev"), nextBtn=$("next"), skipBtn=$("skip");
-  const playpause=$("playpause"), curEl=$("cur"), durEl=$("dur"), muteBtn=$("mute"), fsBtn=$("fs"), volEl=$("vol"), pipBtn=$("pip");
+  const playpause=$("playpause"), curEl=$("cur"), durEl=$("dur"), muteBtn=$("mute"), fsBtn=$("fs"), volEl=$("vol");
   const volpop=$("volpop"), muteToggle=$("muteToggle");
   const listBtn=$("list"), playlist=$("playlist"), eplist=$("eplist"), skipEndBtn=$("skipEnd");
 
@@ -208,7 +207,6 @@
     mute:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3z"/><path d="M16 8l5 5m0-5l-5 5" stroke="currentColor" stroke-width="2" fill="none"/></svg>',
     fsOn:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>',
     fsOff: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>',
-    pip:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-6v5h6v-5zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>',
   };
   const seek=$("seek"), fill=seek.querySelector(".fill"), buf=seek.querySelector(".buf"), thumb=seek.querySelector(".thumb");
 
@@ -335,47 +333,6 @@
   }
   fsBtn.onclick=()=>{ showUI(); if (isFS()) exitFullscreen(); else enterFullscreen(); setTimeout(syncFsIcon, 300); };
   if (tg && tg.onEvent) { try { tg.onEvent("fullscreenChanged", syncFsIcon); } catch(e){} }
-
-  // Picture-in-Picture — standard API (desktop/Android) + iOS webkit, with a native
-  // fullscreen fallback on iOS. Support is re-checked after the video loads, because
-  // iOS reports webkitSupportsPresentationMode=false until a source is attached.
-  pipBtn.innerHTML=ICON.pip;
-  function pipWebkitSupported(){
-    return typeof video.webkitSupportsPresentationMode==="function" &&
-           typeof video.webkitSetPresentationMode==="function" &&
-           video.webkitSupportsPresentationMode("picture-in-picture");
-  }
-  function pipStdSupported(){
-    return !!document.pictureInPictureEnabled && !video.disablePictureInPicture;
-  }
-  function updatePipBtn(){
-    // On iOS always offer the button — even without in-webview PiP we can hand off to
-    // the native player (which has its own PiP control).
-    const show = pipStdSupported() || pipWebkitSupported() ||
-                 (isIOS && typeof video.webkitEnterFullscreen==="function");
-    pipBtn.style.display = show ? "" : "none";
-  }
-  updatePipBtn();
-  video.addEventListener("loadedmetadata", updatePipBtn);
-  function inPiP(){
-    return document.pictureInPictureElement===video ||
-           (video.webkitPresentationMode==="picture-in-picture");
-  }
-  async function togglePiP(){
-    try{
-      if(pipWebkitSupported()){
-        video.webkitSetPresentationMode(inPiP() ? "inline" : "picture-in-picture");
-        return;
-      }
-      if(document.pictureInPictureElement){ await document.exitPictureInPicture(); return; }
-      if(document.pictureInPictureEnabled && video.requestPictureInPicture){
-        await video.requestPictureInPicture(); return;
-      }
-      // iOS without in-webview PiP: open the native player (has a system PiP button)
-      if(typeof video.webkitEnterFullscreen==="function"){ video.webkitEnterFullscreen(); }
-    }catch(e){}
-  }
-  pipBtn.onclick=()=>{ showUI(); togglePiP(); };
 
   // Desktop: mouse movement reveals controls; keyboard shortcuts
   document.addEventListener("mousemove", showUI);
