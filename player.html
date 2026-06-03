@@ -213,20 +213,43 @@
   let hls=null, releaseName="Аниме", episodes=[], sources={}, curQuality=null, curOpening=null, curEnding=null;
   const posKey = ord => "alib_pos_" + rid + "_" + ord;
   const watchedKey = "alib_watched_" + rid;
-  function getWatched(){ try { return new Set(JSON.parse(localStorage.getItem(watchedKey) || "[]")); } catch(e){ return new Set(); } }
-  function postWatched(payload){
-    if(!apiBase || !tg || !tg.initData) return;
-    try {
-      fetch(apiBase.replace(/\/$/,"") + "/api/watched", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify(Object.assign({ init_data: tg.initData, release_id: Number(rid) }, payload)),
-      }).catch(()=>{});
-    } catch(e){}
+  // The bot backend is the source of truth (cross-device). localStorage is a mirror /
+  // offline cache; serverWatched + serverPos are pulled on open via /api/state.
+  const serverWatched = new Set();
+  let serverPos = {};                       // { "<ordinal>": seconds }
+  function getLocalWatched(){ try { return new Set(JSON.parse(localStorage.getItem(watchedKey) || "[]")); } catch(e){ return new Set(); } }
+  function getWatched(){ const s = getLocalWatched(); serverWatched.forEach(o => s.add(o)); return s; }  // union for ✓
+  function apiUrl(path){ return apiBase ? apiBase.replace(/\/$/,"") + path : null; }
+  function apiPost(path, payload){
+    const u = apiUrl(path); if(!u || !tg || !tg.initData) return Promise.resolve(null);
+    return fetch(u, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(Object.assign({ init_data: tg.initData, release_id: Number(rid) }, payload)),
+    }).catch(()=>null);
   }
-  function reportWatched(ord){ postWatched({ episode: ord }); }
-  // Push the whole localStorage watched list to the bot (sync existing ✓ on open)
-  function syncAllWatched(){ const arr=[...getWatched()]; if(arr.length) postWatched({ watched: arr }); }
-  function markWatched(ord){ const s=getWatched(); if(!s.has(ord)){ s.add(ord); localStorage.setItem(watchedKey, JSON.stringify([...s])); buildPlaylist(); reportWatched(ord); } }
+  function reportWatched(ord){ apiPost("/api/watched", { episode: ord }); }
+  function syncAllWatched(){ const arr=[...getLocalWatched()]; if(arr.length) apiPost("/api/watched", { watched: arr }); }
+  function postPosition(ord, pos){ apiPost("/api/position", { episode: ord, position: Math.floor(pos||0) }); }
+  function markWatched(ord){
+    if(getWatched().has(ord)) return;       // already known locally or on the server
+    const s=getLocalWatched(); s.add(ord); localStorage.setItem(watchedKey, JSON.stringify([...s]));
+    serverWatched.add(ord); buildPlaylist(); reportWatched(ord);
+  }
+  // Pull watched ✓ + resume positions from the backend so they follow the user across
+  // devices (and survive Telegram clearing the Mini App's localStorage).
+  async function loadServerState(){
+    const r = await apiPost("/api/state", {});
+    if(!r) return;
+    let d; try { d = await r.json(); } catch(e){ return; }
+    if(!d || !d.ok) return;
+    (d.watched || []).forEach(o => serverWatched.add(parseFloat(o)));
+    serverPos = {};
+    (d.positions || []).forEach(p => { serverPos[String(parseFloat(p[0]))] = parseFloat(p[1]); });
+    // mirror server ✓ into localStorage so they persist and re-sync later
+    const s = getLocalWatched(); let ch=false;
+    serverWatched.forEach(o => { if(!s.has(o)){ s.add(o); ch=true; } });
+    if(ch) localStorage.setItem(watchedKey, JSON.stringify([...s]));
+  }
   const fmtT = s => { s=Math.floor(s||0); const m=Math.floor(s/60); return m+":"+String(s%60).padStart(2,"0"); };
 
   function showMsg(t,sp){ msg.classList.remove("hidden"); msg.querySelector(".spin").style.display=sp?"block":"none"; msgText.textContent=t; }
@@ -356,13 +379,16 @@
   seek.addEventListener("pointerup", e=>{ if(!scrubbing)return; scrubbing=false; const r=ratioFromEvent(e); if(video.duration) video.currentTime=r*video.duration; showUI(); });
 
   // resume + skip-opening + progress
-  let lastSave=0;
+  let lastSave=0, lastServerSave=0;
   video.addEventListener("loadedmetadata", ()=>{ durEl.textContent=fmtT(video.duration); });
   video.addEventListener("progress", ()=>{ try{ if(video.buffered.length&&video.duration){ buf.style.width=(video.buffered.end(video.buffered.length-1)/video.duration*100)+"%"; } }catch(e){} });
   video.addEventListener("timeupdate", ()=>{
     const t=video.currentTime||0;
     if(!scrubbing){ if(video.duration){ setProgress(t/video.duration); curEl.textContent=fmtT(t); } }
-    if(Math.abs(t-lastSave)>4){ lastSave=t; if(t>5&&video.duration&&t<video.duration-5) localStorage.setItem(posKey(curOrd),String(t)); }
+    if(t>5 && video.duration && t<video.duration-5){
+      if(Math.abs(t-lastSave)>4){ lastSave=t; localStorage.setItem(posKey(curOrd),String(t)); }
+      if(t-lastServerSave>15){ lastServerSave=t; postPosition(curOrd,t); }   // resume point → DB
+    }
     if(curOpening && t>=curOpening.start && t<curOpening.stop-0.5) skipBtn.classList.add("show"); else skipBtn.classList.remove("show");
     // Show "skip ending" while inside the ending interval (until just before its end, so post-credit scenes remain)
     if(curEnding && curEnding.stop!=null && t>=curEnding.start && t<curEnding.stop-0.5) skipEndBtn.classList.add("show"); else skipEndBtn.classList.remove("show");
@@ -396,18 +422,33 @@
     setProgress(0); curEl.textContent="0:00"; buf.style.width="0";
     const q=(keepQ&&sources[curQuality])?curQuality:(sources["720"]?"720":(sources["480"]?"480":"1080"));
     if(!sources[q]){ showMsg("Нет доступных потоков.",false); return; }
-    const saved=parseFloat(localStorage.getItem(posKey(ordinal)))||0;
-    hideMsg(); updateNav(); buildPlaylist(); lastSave=saved; setQuality(q,saved); showUI();
+    const localPos=parseFloat(localStorage.getItem(posKey(ordinal)))||0;
+    const srvPos=serverPos[String(ordinal)]||0;
+    const saved=Math.max(localPos, srvPos);   // resume from the furthest point, any device
+    hideMsg(); updateNav(); buildPlaylist(); lastSave=saved; lastServerSave=saved; setQuality(q,saved); showUI();
   }
   prevBtn.onclick=()=>{ const i=curIndex(); if(i>0) loadEpisode(parseFloat(episodes[i-1].ordinal),true); };
   nextBtn.onclick=()=>{ const i=curIndex(); if(i>=0&&i<episodes.length-1) loadEpisode(parseFloat(episodes[i+1].ordinal),true); };
-  video.addEventListener("ended", ()=>{ markWatched(curOrd); localStorage.removeItem(posKey(curOrd));
+  video.addEventListener("ended", ()=>{ markWatched(curOrd); localStorage.removeItem(posKey(curOrd)); postPosition(curOrd,0);
     const i=curIndex(); if(i>=0&&i<episodes.length-1) loadEpisode(parseFloat(episodes[i+1].ordinal),true); });
+
+  // Flush the resume position to the backend on pause / when the player is hidden, so a
+  // half-watched episode resumes correctly on another device even without reaching 15s tick.
+  function flushPosition(){ const t=video.currentTime||0; if(t>5&&video.duration&&t<video.duration-5){ lastServerSave=t; postPosition(curOrd,t); } }
+  video.addEventListener("pause", flushPosition);
+  document.addEventListener("visibilitychange", ()=>{ if(document.hidden) flushPosition(); });
+  window.addEventListener("pagehide", flushPosition);
 
   // init
   if(!rid||isNaN(curOrd)){ showMsg("Не указана серия.",false); return; }
   syncAllWatched();  // push any existing local ✓ marks to the bot on open
-  fetch(API+encodeURIComponent(rid)).then(r=>r.json()).then(data=>{
+  // Pull server state (✓ + resume positions) and the catalog in parallel. The state
+  // fetch is time-boxed so a dead/slow backend never blocks playback from starting.
+  const withTimeout=(p,ms)=>Promise.race([p, new Promise(res=>setTimeout(()=>res(null),ms))]);
+  Promise.all([
+    withTimeout(loadServerState(), 4000),
+    fetch(API+encodeURIComponent(rid)).then(r=>r.json()),
+  ]).then(([_, data])=>{
     releaseName=(data.name&&data.name.main)||"Аниме";
     episodes=(data.episodes||[]).slice().sort((a,b)=>parseFloat(a.ordinal)-parseFloat(b.ordinal));
     if(!episodes.length){ showMsg("Серии недоступны.",false); return; }
