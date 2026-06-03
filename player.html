@@ -394,13 +394,13 @@
     if(curEnding && curEnding.stop!=null && t>=curEnding.start && t<curEnding.stop-0.5) skipEndBtn.classList.add("show"); else skipEndBtn.classList.remove("show");
     checkWatched();
   });
-  // Mark watched once playback reaches the ending, OR ~75% of the episode, OR the last
-  // 20s — so it counts even when the episode has no ending metadata and the viewer
-  // doesn't sit through the final credits (no need to press "skip ending").
+  // Mark watched 5s before the ending begins (so it counts even if you stop right
+  // before the ED). If the episode has no ending metadata, fall back to the last 5s.
   function checkWatched(){
     const t=video.currentTime||0, d=video.duration||0;
     if(!d) return;
-    if((curEnding && t>=curEnding.start) || t>=d*0.75 || t>=d-20) markWatched(curOrd);
+    if(curEnding && curEnding.start!=null){ if(t>=curEnding.start-5) markWatched(curOrd); }
+    else if(t>=d-5){ markWatched(curOrd); }
   }
   video.addEventListener("seeked", checkWatched);
   skipBtn.onclick=()=>{ if(curOpening){ video.currentTime=curOpening.stop; skipBtn.classList.remove("show"); } };
